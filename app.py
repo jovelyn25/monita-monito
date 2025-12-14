@@ -35,86 +35,47 @@ with db() as con:
     """)
 
 # ---------------- ADMIN ----------------
-@app.route('/admin/create')
-def admin_create():
-    code = ''.join(random.choices('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', k=6))
+# ---------------- ADMIN PAGE ----------------
+@app.route('/admin/group/<code>')
+def admin_group(code):
     with db() as con:
-        con.execute("INSERT INTO groups VALUES (?,0)", (code,))
-    return render_template_string('''
-    <html><head><title>Group Created</title>
-    <style>
-    body { font-family: Arial; background: #ffe6f0; text-align:center; padding:50px; }
-    a { color:#ff3399; text-decoration:none; font-weight:bold; }
-    </style>
-    </head><body>
-    <h2>Group Created ✅</h2>
-    <p>Group Code: <b>{{code}}</b></p>
-    <a href='/'>Go to Join Page</a>
-    </body></html>
-    ''', code=code)
+        # Check if group exists
+        g = con.execute("SELECT code, paired FROM groups WHERE code=?", (code,)).fetchone()
+        if not g:
+            return "Invalid group code"
 
-@app.route('/admin/pair/<code>')
-def admin_pair(code):
-    with db() as con:
-        users = con.execute("SELECT id FROM users WHERE group_code=?", (code,)).fetchall()
-        if len(users) < 2:
-            return "Need at least 2 members"
-        existing_pairs = con.execute("SELECT * FROM pairs WHERE group_code=?", (code,)).fetchone()
-        if existing_pairs:
-            return "Pairing already done 🔒"
-        ids = [u[0] for u in users]
-        random.shuffle(ids)
-        for i in range(len(ids)):
-            con.execute("INSERT INTO pairs VALUES (?,?,?)", (ids[i], ids[(i+1)%len(ids)], code))
-        con.execute("UPDATE groups SET paired=1 WHERE code=?", (code,))
-    return redirect(f'/admin/table/{code}')
+        # If not paired, do pairing automatically
+        if g[1] == 0:
+            users = con.execute("SELECT id FROM users WHERE group_code=?", (code,)).fetchall()
+            if len(users) < 2:
+                return "Need at least 2 members to pair"
+            con.execute("DELETE FROM pairs WHERE group_code=?", (code,))
+            ids = [u[0] for u in users]
+            random.shuffle(ids)
+            for i in range(len(ids)):
+                con.execute("INSERT INTO pairs VALUES (?,?,?)", (ids[i], ids[(i+1)%len(ids)], code))
+            con.execute("UPDATE groups SET paired=1 WHERE code=?", (code,))
 
-@app.route('/admin/table/<code>')
-def admin_table(code):
-    with db() as con:
+        # Fetch paired table
         table = con.execute("""
-            SELECT u.codename AS giver, m.codename AS monito
+            SELECT u.codename AS giver, m.codename AS receiver
             FROM pairs p
-            JOIN users u ON u.id = p.giver
-            JOIN users m ON m.id = p.receiver
+            JOIN users u ON u.id=p.giver
+            JOIN users m ON m.id=p.receiver
             WHERE p.group_code=?
         """, (code,)).fetchall()
 
     return render_template_string('''
-    <html><head><title>Admin Table</title>
-    <style>
-    body { font-family: Arial; background:#fff0f5; padding:40px; }
-    h3 { color:#ff3399; }
-    table { border-collapse: collapse; width: 60%; margin:auto; background:#fff; }
-    th, td { border:1px solid #ff99cc; padding:10px; text-align:center; }
-    th { background:#ff99cc; color:white; }
-    a { display:inline-block; margin-top:20px; text-decoration:none; color:#ff3399; font-weight:bold; }
-    </style>
-    </head><body>
-    <h3>Full Pairing Table (Codenames Only)</h3>
-    <table>
-        <tr><th>Giver</th><th>Monito</th></tr>
+    <h2>Admin Page — Group {{code}}</h2>
+    <p>Pairing done automatically if not already paired.</p>
+    <h3>Group Table (Codenames Only)</h3>
+    <table border="1" cellpadding="6">
+        <tr><th>Giver (Monita)</th><th>Receiver (Monito)</th></tr>
         {% for r in table %}
         <tr><td>{{r[0]}}</td><td>{{r[1]}}</td></tr>
         {% endfor %}
     </table>
-    <a href="/admin/reset/{{code}}">Reset Game</a>
-    </body></html>
     ''', table=table, code=code)
-
-@app.route('/admin/reset/<code>')
-def reset_game(code):
-    with db() as con:
-        con.execute("DELETE FROM pairs WHERE group_code=?", (code,))
-        con.execute("DELETE FROM users WHERE group_code=?", (code,))
-        con.execute("UPDATE groups SET paired=0 WHERE code=?", (code,))
-    return f'''
-    <html><head><title>Reset Game</title></head>
-    <body style="font-family:Arial; background:#ffe6f0; text-align:center; padding:50px;">
-    <h2>Game reset for group {code} ✅</h2>
-    <a href='/'>Back to join page</a>
-    </body></html>
-    '''
 
 # ---------------- USER ----------------
 @app.route('/', methods=['GET','POST'])
