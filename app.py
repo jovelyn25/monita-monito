@@ -179,13 +179,21 @@ def join():
     return render_template_string(STYLE + """
     <div class="card">
         <h2>🎄 Join Monita–Monito</h2>
+
         <form method="post">
             <input name="real" placeholder="Real Name" required>
             <input name="codename" placeholder="Code Name" required>
             <input name="group" placeholder="Group Code" required>
             <button>🎁 Join</button>
         </form>
-        <div class="footer">Merry Christmas 🎅🎄</div>
+
+        <hr style="margin:20px 0;">
+
+        <a href="/admin/create">
+            <button style="background:#006400;">🎅 Admin Panel</button>
+        </a>
+
+        <div class="footer">Merry Christmas 🎄</div>
     </div>
     """)
 
