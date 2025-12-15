@@ -1,7 +1,3 @@
-# Monita–Monito Flask App (Admin-controlled pairing)
-# Members see only their own Monita/Monito
-# Admin sees full table (codenames only) after pairing
-
 from flask import Flask, render_template_string, request, redirect, session
 import random, sqlite3
 
@@ -36,95 +32,162 @@ with db() as con:
     )
     """)
 
+# ---------------- SHARED CHRISTMAS STYLE ----------------
+STYLE = """
+<style>
+body {
+    background: linear-gradient(to bottom, #b30000, #006400);
+    font-family: 'Segoe UI', sans-serif;
+    color: #fff;
+    text-align: center;
+    padding: 40px;
+}
+.card {
+    background: #ffffff;
+    color: #333;
+    max-width: 420px;
+    margin: auto;
+    padding: 25px;
+    border-radius: 15px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+}
+h2, h3 {
+    color: #b30000;
+}
+input {
+    width: 100%;
+    padding: 10px;
+    margin: 6px 0;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+}
+button {
+    background: #b30000;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 16px;
+}
+button:hover {
+    background: #8b0000;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+th {
+    background: #006400;
+    color: white;
+    padding: 8px;
+}
+td {
+    background: #f8f8f8;
+    padding: 8px;
+}
+.footer {
+    margin-top: 20px;
+    font-size: 14px;
+    color: #eee;
+}
+</style>
+"""
+
 # ---------------- ADMIN: CREATE GROUP ----------------
 @app.route('/admin/create')
 def admin_create():
     code = ''.join(random.choices('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', k=6))
     with db() as con:
-        con.execute("INSERT INTO groups (code, paired) VALUES (?,0)", (code,))
-    return f"""
-    <h2 style="color:green;">Group Created ✅</h2>
-    <p>Group Code: <b>{code}</b></p>
-    <p>Go to <a href='/admin/group/{code}'>Admin Page</a> to pair members and view table.</p>
-    """
+        con.execute("INSERT INTO groups VALUES (?,0)", (code,))
+    return render_template_string(STYLE + f"""
+    <div class="card">
+        <h2>🎄 Group Created!</h2>
+        <p><b>Group Code:</b> {code}</p>
+        <p>Give this code to members</p>
+        <a href="/admin/group/{code}">
+            <button>Go to Admin Page</button>
+        </a>
+    </div>
+    """)
 
-# ---------------- ADMIN: MANUAL PAIRING & TABLE ----------------
+# ---------------- ADMIN: MANUAL PAIRING ----------------
 @app.route('/admin/group/<code>', methods=['GET','POST'])
 def admin_group(code):
     with db() as con:
-        g = con.execute("SELECT code, paired FROM groups WHERE code=?", (code,)).fetchone()
+        g = con.execute("SELECT paired FROM groups WHERE code=?", (code,)).fetchone()
         if not g:
-            return "Invalid group code"
+            return "Invalid group"
 
-        if request.method == 'POST' and g[1] == 0:
-            # Perform manual pairing
+        if request.method == 'POST' and g[0] == 0:
             users = con.execute("SELECT id FROM users WHERE group_code=?", (code,)).fetchall()
             if len(users) < 2:
-                return "<p style='color:red;'>Need at least 2 members to pair.</p>"
+                return "Need at least 2 members"
             con.execute("DELETE FROM pairs WHERE group_code=?", (code,))
             ids = [u[0] for u in users]
             random.shuffle(ids)
             for i in range(len(ids)):
-                con.execute("INSERT INTO pairs VALUES (?,?,?)", (ids[i], ids[(i+1)%len(ids)], code))
+                con.execute("INSERT INTO pairs VALUES (?,?,?)",
+                            (ids[i], ids[(i+1)%len(ids)], code))
             con.execute("UPDATE groups SET paired=1 WHERE code=?", (code,))
 
-        # Fetch table with codenames only
         table = con.execute("""
-            SELECT u.codename AS giver, m.codename AS receiver
+            SELECT u.codename, m.codename
             FROM pairs p
             JOIN users u ON u.id=p.giver
             JOIN users m ON m.id=p.receiver
             WHERE p.group_code=?
         """, (code,)).fetchall()
-        paired = g[1]
 
-    return render_template_string('''
-    <h2 style="color:blue;">Admin Page — Group {{code}}</h2>
-    {% if not paired %}
-    <p>Members have joined. Click the button to pair them manually.</p>
-    <form method="post">
-        <button style="padding:6px 12px;">Pair Members</button>
-    </form>
-    {% else %}
-    <p style="color:green;">Pairing complete ✅</p>
-    <h3>Group Table (Codenames Only)</h3>
-    <table border="1" cellpadding="6" style="border-collapse: collapse;">
-        <tr style="background:#f0f0f0;"><th>Giver (Monita)</th><th>Receiver (Monito)</th></tr>
-        {% for r in table %}
-        <tr><td>{{r[0]}}</td><td>{{r[1]}}</td></tr>
-        {% endfor %}
-    </table>
-    {% endif %}
-    ''', table=table, code=code, paired=paired)
+    return render_template_string(STYLE + """
+    <div class="card">
+        <h2>🎅 Admin Panel</h2>
+        {% if not table %}
+        <p>Members are joining...</p>
+        <form method="post">
+            <button>🎁 Pair Members</button>
+        </form>
+        {% else %}
+        <h3>🎄 Pairing Table</h3>
+        <table>
+            <tr><th>Monita</th><th>Monito</th></tr>
+            {% for r in table %}
+            <tr><td>{{r[0]}}</td><td>{{r[1]}}</td></tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+    </div>
+    """, table=table)
 
 # ---------------- USER: JOIN ----------------
 @app.route('/', methods=['GET','POST'])
 def join():
     if request.method == 'POST':
         real = request.form['real']
-        code_name = request.form['codename']
+        codename = request.form['codename']
         group = request.form['group']
         with db() as con:
-            g = con.execute("SELECT code FROM groups WHERE code=?", (group,)).fetchone()
-            if not g:
-                return "<p style='color:red;'>Invalid group code</p>"
-            con.execute("INSERT INTO users (real_name,codename,group_code) VALUES (?,?,?)",
-                        (real, code_name, group))
+            if not con.execute("SELECT 1 FROM groups WHERE code=?", (group,)).fetchone():
+                return "Invalid group code"
+            con.execute("INSERT INTO users VALUES (NULL,?,?,?)",
+                        (real, codename, group))
             uid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
         session['uid'] = uid
         return redirect('/dashboard')
 
-    return render_template_string('''
-    <h2 style="color:purple;">Join Monita–Monito</h2>
-    <form method="post" style="max-width:400px;">
-        Real Name:<br><input name="real" required style="width:100%;padding:6px;margin:4px 0;"><br>
-        Code Name (alias):<br><input name="codename" required style="width:100%;padding:6px;margin:4px 0;"><br>
-        Group Code:<br><input name="group" required style="width:100%;padding:6px;margin:4px 0;"><br>
-        <button style="padding:6px 12px;">Join</button>
-    </form>
-    <hr>
-    <a href="/admin/create">Create Group (Admin)</a>
-    ''')
+    return render_template_string(STYLE + """
+    <div class="card">
+        <h2>🎄 Join Monita–Monito</h2>
+        <form method="post">
+            <input name="real" placeholder="Real Name" required>
+            <input name="codename" placeholder="Code Name" required>
+            <input name="group" placeholder="Group Code" required>
+            <button>🎁 Join</button>
+        </form>
+        <div class="footer">Merry Christmas 🎅🎄</div>
+    </div>
+    """)
 
 # ---------------- USER: DASHBOARD ----------------
 @app.route('/dashboard')
@@ -136,17 +199,26 @@ def dashboard():
     with db() as con:
         pair = con.execute("SELECT receiver FROM pairs WHERE giver=?", (uid,)).fetchone()
         if not pair:
-            return "<p>Waiting for admin to pair members 🔒</p>"
-        receiver = pair[0]
-        monito = con.execute("SELECT codename FROM users WHERE id=?", (receiver,)).fetchone()[0]
-        monita = con.execute("SELECT codename FROM users WHERE id=(SELECT giver FROM pairs WHERE receiver=?)", (uid,)).fetchone()[0]
+            return render_template_string(STYLE + """
+            <div class="card">
+                <h3>⏳ Waiting for pairing...</h3>
+                <p>Please check back later 🎄</p>
+            </div>
+            """)
+        monito = con.execute("SELECT codename FROM users WHERE id=?", (pair[0],)).fetchone()[0]
+        monita = con.execute(
+            "SELECT codename FROM users WHERE id=(SELECT giver FROM pairs WHERE receiver=?)",
+            (uid,)).fetchone()[0]
 
-    return render_template_string('''
-    <h3 style="color:green;">Your Assignment</h3>
-    <p>🌸 Your Monita (giver): <b>{{monita}}</b></p>
-    <p>🎁 Your Monito (receiver): <b>{{monito}}</b></p>
-    ''', monita=monita, monito=monito)
+    return render_template_string(STYLE + """
+    <div class="card">
+        <h2>🎁 Your Assignment</h2>
+        <p>🌸 Your Monita: <b>{{monita}}</b></p>
+        <p>🎁 Your Monito: <b>{{monito}}</b></p>
+        <div class="footer">Secret until Christmas 🎄</div>
+    </div>
+    """, monita=monita, monito=monito)
 
 # ---------------- RUN ----------------
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    app.run(host="0.0.0.0", port=5001)
